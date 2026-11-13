@@ -86,6 +86,7 @@ export interface StremioStream {
   title: string;
   url?: string;
   externalUrl?: string;
+  headers?: Record<string, string>;
 }
 
 /** `.m3u8`/`.mpd`/`.mp4`/… URLs Stremio can play natively. */
@@ -102,25 +103,35 @@ function streamTitle(r: StreamResult): string {
 /**
  * Map provider StreamResults to Stremio streams: direct URLs → `{url}`,
  * everything else → `{externalUrl}` (Stremio opens it in the browser).
- * Dedupes by URL, caps output so the manifest response stays sane.
+ * Playable streams are listed first; dedupes by URL, caps output so the
+ * manifest response stays sane.
  */
 export function toStremioStreams(results: StreamResult[]): StremioStream[] {
   const seen = new Set<string>();
-  const out: StremioStream[] = [];
+  const playable: StremioStream[] = [];
+  const external: StremioStream[] = [];
 
   for (const r of results) {
     if (seen.has(r.url)) continue;
     seen.add(r.url);
 
     const title = streamTitle(r);
-    out.push(
-      isDirectUrl(r.url)
-        ? { name: r.provider, title, url: r.url }
-        : { name: r.provider, title: `${title} (open in browser)`, externalUrl: r.url }
-    );
-    if (out.length >= 30) break;
+    // resolvers may return extension-less media (signed token URLs) — they
+    // attach playback headers exactly when they verified the target is media
+    if (isDirectUrl(r.url) || (r.headers && Object.keys(r.headers).length > 0)) {
+      const s: StremioStream = { name: r.provider, title, url: r.url };
+      if (r.headers && Object.keys(r.headers).length > 0) s.headers = r.headers;
+      playable.push(s);
+    } else {
+      external.push({
+        name: r.provider,
+        title: `${title} (open in browser)`,
+        externalUrl: r.url,
+      });
+    }
+    if (playable.length + external.length >= 30) break;
   }
-  return out;
+  return [...playable, ...external];
 }
 
 export function streamResponse(streams: StremioStream[]): { streams: StremioStream[] } {

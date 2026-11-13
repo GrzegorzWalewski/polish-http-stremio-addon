@@ -120,6 +120,7 @@ async function resolveStage(results: StreamResult[]): Promise<StreamResult[]> {
       url: resolved.url,
       quality: resolved.quality ?? r.quality,
       label: `resolved (${r.label ?? r.provider})`,
+      headers: resolved.headers,
     };
   });
 
