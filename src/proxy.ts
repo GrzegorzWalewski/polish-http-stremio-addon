@@ -9,7 +9,8 @@
  */
 
 import * as http from 'node:http';
-import { Readable } from 'node:stream';
+import { Readable, Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 
 const BLOCKED_HOSTS = /^(localhost|127\.|0\.0\.0\.0|\[::1\]|\[::\]|::1)/i;
 
@@ -176,16 +177,37 @@ async function fetchUpstream(
 async function pipeBody(
   body: ReadableStream | null,
   res: http.ServerResponse
-): Promise<void> {
+): Promise<number> {
   if (!body) {
     res.end();
-    return;
+    return 0;
   }
+  let bytes = 0;
+  const counter = new Transform({
+    transform(chunk: Buffer, _enc, cb) {
+      bytes += chunk.length;
+      cb(null, chunk);
+    },
+  });
   try {
-    await Readable.fromWeb(body as never).pipe(res);
+    await pipeline(Readable.fromWeb(body as never), counter, res);
   } catch {
     res.destroy(); // client seek/disconnect — nothing to clean up
   }
+  return bytes;
+}
+
+function logProxy(
+  target: URL,
+  req: http.IncomingMessage,
+  status: number | string,
+  bytes: number,
+  ms: number,
+  note = ''
+): void {
+  console.log(
+    `${new Date().toISOString()} proxy [${req.headers.range ?? '-'}] ${target.host}${target.pathname.slice(0, 40)} -> ${status} ${Math.round(bytes / 1024)}KB ${Math.round(ms)}ms${note ? ` ${note}` : ''}`
+  );
 }
 
 export async function handleProxy(
@@ -216,6 +238,7 @@ export async function handleProxy(
 
   const range = req.headers.range;
   const headers = upstreamHeaders(req, url);
+  const t0 = performance.now();
 
   // ---- warm start: open-ended byte-0 request hits the prefetch cache ----
   const entry = warm.get(parsed.href);
@@ -231,9 +254,11 @@ export async function handleProxy(
       ...(range ? { 'content-range': `bytes 0-${total - 1}/${total}` } : {}),
       'accept-ranges': 'bytes',
     });
+    let served = entry.data.length;
     res.write(entry.data);
     if (total <= entry.data.length) {
       res.end();
+      logProxy(parsed, req, range ? 206 : 200, served, performance.now() - t0, '(warm, whole file)');
       return;
     }
     // remainder streams live from the CDN starting after the cached chunk
@@ -242,8 +267,10 @@ export async function handleProxy(
         ...headers,
         Range: `bytes=${entry.data.length}-`,
       });
-      await pipeBody(rest.body, res);
-    } catch {
+      served += await pipeBody(rest.body, res);
+      logProxy(parsed, req, rest.status, served, performance.now() - t0, '(warm splice)');
+    } catch (err) {
+      logProxy(parsed, req, 'ERR', served, performance.now() - t0, `(splice failed: ${(err as Error).message})`);
       res.end();
     }
     return;
@@ -254,14 +281,10 @@ export async function handleProxy(
   try {
     upstream = await fetchUpstream(parsed, headers);
   } catch (err) {
-    console.error(`${new Date().toISOString()} proxy: upstream failed for ${parsed.host}: ${(err as Error).message}`);
+    logProxy(parsed, req, 'ERR', 0, performance.now() - t0, `(upstream failed: ${(err as Error).message})`);
     res.writeHead(502, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'upstream fetch failed' }));
     return;
-  }
-
-  if (upstream.status >= 400) {
-    console.error(`${new Date().toISOString()} proxy: upstream ${upstream.status} for ${parsed.host}${parsed.pathname.slice(0, 40)}`);
   }
 
   const out: http.OutgoingHttpHeaders = {};
@@ -288,9 +311,28 @@ export async function handleProxy(
     out['content-length'] = String(Buffer.byteLength(body));
     res.writeHead(upstream.status, out);
     res.end(body);
+    logProxy(parsed, req, upstream.status, Buffer.byteLength(body), performance.now() - t0, '(playlist)');
     return;
   }
 
-  res.writeHead(upstream.status, out);
-  await pipeBody(upstream.body, res);
+  // hoster gate / error page: fail fast instead of letting the player try
+  // to demux HTML (which shows as endless buffering)
+  if (/^text\/html/i.test(ct) && upstream.ok) {
+    await upstream.body?.cancel();
+    logProxy(parsed, req, upstream.status, 0, performance.now() - t0, '(html — gated?)');
+    res.writeHead(502, { 'Content-Type': 'text/plain' });
+    res.end('upstream returned an html page, not media');
+    return;
+  }
+
+  if (upstream.status >= 400) {
+    await upstream.body?.cancel();
+    logProxy(parsed, req, upstream.status, 0, performance.now() - t0);
+    res.writeHead(upstream.status, out);
+    res.end();
+    return;
+  }
+
+  const served = await pipeBody(upstream.body, res);
+  logProxy(parsed, req, upstream.status, served, performance.now() - t0);
 }
