@@ -87,6 +87,12 @@ export interface StremioStream {
   url?: string;
   externalUrl?: string;
   headers?: Record<string, string>;
+  /** official per-stream headers channel (desktop + android honor this;
+   * the top-level `headers` field is not part of the protocol) */
+  behaviorHints?: {
+    proxyHeaders?: Record<string, string>;
+    notWebReady?: boolean;
+  };
 }
 
 /** `.m3u8`/`.mpd`/`.mp4`/… URLs Stremio can play natively. */
@@ -120,7 +126,11 @@ export function toStremioStreams(results: StreamResult[]): StremioStream[] {
     // attach playback headers exactly when they verified the target is media
     if (isDirectUrl(r.url) || (r.headers && Object.keys(r.headers).length > 0)) {
       const s: StremioStream = { name: r.provider, title, url: r.url };
-      if (r.headers && Object.keys(r.headers).length > 0) s.headers = r.headers;
+      const hdrs = r.headers && Object.keys(r.headers).length > 0 ? r.headers : undefined;
+      if (hdrs) {
+        s.headers = hdrs;
+        s.behaviorHints = { proxyHeaders: hdrs, notWebReady: true };
+      }
       playable.push(s);
     } else {
       external.push({

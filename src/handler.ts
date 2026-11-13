@@ -91,6 +91,7 @@ async function runProviders(
             title: media.plTitle,
             originalTitle: media.originalTitle,
             year: media.year,
+            runtimeMinutes: media.runtimeMinutes,
             season: parsed.season,
             episode: parsed.episode,
             absoluteEpisode,
