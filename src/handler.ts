@@ -49,6 +49,11 @@ function recordWarnings(warnings: string[]): void {
   lastWarnings.length = Math.min(lastWarnings.length, 50);
 }
 
+/** Number of cached stream outcomes (for /healthz). */
+export function streamCacheSize(): number {
+  return streamCache.size;
+}
+
 /** Absolute episode lookup cached per tmdbId:season:episode for 6h. */
 const absEpCache = new TtlCache<number>();
 

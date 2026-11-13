@@ -3,9 +3,25 @@
 Stremio HTTP addon exposing stream links from 17 Polish streaming sites,
 powered by [movies-series-fetcher](https://github.com/GrzegorzWalewski/polish-movies-and-series-fetcher).
 
-Resolvable hosts (e.g. cda.pl) produce **direct playable URLs**; everything
-else falls back to an **external link** that opens the site page in your
-browser. No playback of premium content.
+Embed URLs from known hosters are resolved server-side into **direct playable
+URLs**; everything else falls back to an **external link** that opens the site
+page in your browser. No playback of premium content.
+
+Currently resolvable hosters (all fail soft — an unresolvable embed just
+stays an external link):
+
+| Hoster | Reached via | Method |
+|---|---|---|
+| cda.pl | cda.pl provider | embed normalize + player_data decode |
+| byse (rotating `byse*` domains) | bajeczki24, premiumsmart | proof-of-work captcha + AES-GCM playback payload |
+| fsst.online & friends (filemoon, savefiles, luluvdo, bigwarp, strmup…) | seriale.vip, filman | P.A.C.K.E.R. unpack |
+| voe / dood / vidmoly / vidoza | ekino, filman, seriale.vip | per-hoster decode |
+| ok.ru | dokumentalne.net | `data-options` metadata → HLS |
+| vod.tvp.pl | iitv.info (official TVP links) | TVP VOD JSON API → tokenized HLS |
+| streamtape (mirrors) | (none currently) | ideoolink / `robot()` construction |
+
+Hosters rotate domains and re-obfuscate often — the resolved set shrinks and
+grows over time. Rows that stay unresolved are labeled `(open in browser)`.
 
 ## Setup
 
@@ -35,11 +51,26 @@ npm start
 
 - `/` — install landing page
 - `/manifest.json` — Stremio manifest (`stream` resource, `movie` + `series`, `tt` prefix)
-- `/stream/movie/tt0083564.json`
-- `/stream/series/tt0903747:2:1.json`
-- `/healthz` — status + last provider warnings
+- `/stream/movie/tt0088083.json` — Seksmisja
+- `/stream/series/tt0903747:2:1.json` — The Witcher S2E1
+- `/healthz` — status + last provider warnings (`?limit=50` for more; default 10)
 
-Errors are JSON: `400` malformed id, `503` missing TMDB token.
+```json
+{
+  "status": "ok",
+  "uptimeSeconds": 4212,
+  "tmdbConfigured": true,
+  "flaresolverrConfigured": false,
+  "cachedStreams": 3,
+  "lastWarnings": [
+    { "at": "2026-11-13T11:20:00.000Z", "text": "filman.cc: …" }
+  ]
+}
+```
+
+`lastWarnings` is a debugging aid — one entry per provider error in recent
+stream requests (Cloudflare walls, geo-blocks, captchas). Errors are JSON:
+`400` malformed id, `503` missing TMDB token.
 
 ## Notes / limits
 

@@ -1,12 +1,13 @@
 import * as http from 'node:http';
 import { loadEnvFile } from 'movies-series-fetcher/lib';
 import { MANIFEST, parseStreamId, StreamIdError, streamResponse } from './stremio.js';
-import { getStreams, lastWarnings, UpstreamNotFoundError } from './handler.js';
+import { getStreams, lastWarnings, streamCacheSize, UpstreamNotFoundError } from './handler.js';
 import { landingHtml } from './landing.js';
 
 loadEnvFile();
 
 const PORT = Number(process.env.PORT ?? 7777);
+const startedAt = Date.now();
 
 function setCors(res: http.ServerResponse): void {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -58,10 +59,16 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (path === '/healthz') {
+      const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 10, 0), 50);
       sendJson(res, 200, {
         status: 'ok',
+        uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
         tmdbConfigured: !!process.env.TMDB_READ_TOKEN,
-        lastWarnings: lastWarnings.slice(0, 10),
+        flaresolverrConfigured: !!process.env.FLARESOLVERR_URL,
+        cachedStreams: streamCacheSize(),
+        lastWarnings: lastWarnings
+          .slice(0, limit)
+          .map((w) => ({ at: new Date(w.at).toISOString(), text: w.text })),
       });
       return;
     }
