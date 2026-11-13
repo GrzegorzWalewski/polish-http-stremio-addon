@@ -99,6 +99,45 @@ export function proxyUrlFor(
   return u.toString();
 }
 
+const HLS_CT_RE = /mpegurl/i;
+
+/** Base URL of this server as the calling player sees it. */
+function selfBaseUrl(req: http.IncomingMessage): string {
+  return `http://${req.headers.host ?? `localhost:${process.env.PORT ?? 7777}`}`;
+}
+
+/**
+ * Rewrite relative URIs in an HLS playlist to absolute proxy URLs. Without
+ * this, a player resolving `seg_00001.ts` against
+ * `http://localhost:7777/proxy?u=...` hits the addon router instead of the
+ * proxy and the stream breaks. Absolute URIs (byse variant playlists point
+ * straight at their CDN) are left untouched — those segments flow directly,
+ * which is faster than looping through localhost.
+ */
+function rewritePlaylist(
+  body: string,
+  upstream: URL,
+  baseUrl: string,
+  h: string | null
+): string {
+  return body
+    .split('\n')
+    .map((line) => {
+      const t = line.trim();
+      if (!t || t.startsWith('#')) return line;
+      try {
+        const abs = new URL(t, upstream).href;
+        const p = new URL('/proxy', baseUrl);
+        p.searchParams.set('u', abs);
+        if (h) p.searchParams.set('h', h);
+        return p.toString();
+      } catch {
+        return line;
+      }
+    })
+    .join('\n');
+}
+
 function upstreamHeaders(req: http.IncomingMessage, url: URL): Record<string, string> {
   const headers: Record<string, string> = {
     'accept-encoding': 'identity', // no gzip — range math must stay linear
@@ -182,11 +221,14 @@ export async function handleProxy(
   const entry = warm.get(parsed.href);
   if (warmFresh(entry) && entry.data.length > 0 && (!range || /^bytes=0-$/.test(range))) {
     const total = entry.total ?? entry.data.length;
-    const end = Math.min(entry.data.length, total) - 1;
-    res.writeHead(entry.status === 206 || range ? 206 : 200, {
+    // We deliver the WHOLE resource (cached chunk + live splice), so the
+    // range advertised must span all of it — a 206 whose content-range ends
+    // at the cache boundary while content-length says "full file" confuses
+    // strict clients.
+    res.writeHead(range ? 206 : 200, {
       'content-type': entry.contentType ?? 'application/octet-stream',
       'content-length': String(total),
-      'content-range': `bytes 0-${end}/${total}`,
+      ...(range ? { 'content-range': `bytes 0-${total - 1}/${total}` } : {}),
       'accept-ranges': 'bytes',
     });
     res.write(entry.data);
@@ -228,6 +270,27 @@ export async function handleProxy(
     if (v) out[name] = v;
   }
   out['accept-ranges'] = 'bytes';
+
+  // HLS playlists: rewrite relative URIs so segments keep flowing through
+  // the proxy (or straight to the CDN when the playlist uses absolute URIs)
+  const ct = upstream.headers.get('content-type') ?? '';
+  const isHls =
+    HLS_CT_RE.test(ct) || /\.m3u8(\?|#|$)/i.test(parsed.pathname + parsed.search);
+  if (isHls && upstream.ok && upstream.body) {
+    const text = await upstream.text();
+    const body = rewritePlaylist(
+      text,
+      parsed,
+      selfBaseUrl(req),
+      url.searchParams.get('h')
+    );
+    delete out['content-range'];
+    out['content-length'] = String(Buffer.byteLength(body));
+    res.writeHead(upstream.status, out);
+    res.end(body);
+    return;
+  }
+
   res.writeHead(upstream.status, out);
   await pipeBody(upstream.body, res);
 }
