@@ -1,7 +1,13 @@
 import type { StreamResult } from 'movies-series-fetcher/lib';
+import { proxyUrlFor } from './proxy.js';
 
 export const ADDON_ID = 'community.polish-streams-addon';
 export const ADDON_VERSION = '1.0.0';
+
+/** Base URL of this addon's own server (used for stream proxying). */
+export function addonBaseUrl(): string {
+  return `http://localhost:${process.env.PORT ?? 7777}`;
+}
 
 export interface Manifest {
   id: string;
@@ -106,27 +112,42 @@ function streamTitle(r: StreamResult): string {
   return r.label ? `${base} [${r.label}]` : base;
 }
 
+/** Rows kept per provider — some emit dozens of near-identical variants. */
+const MAX_PER_PROVIDER = 4;
+const MAX_TOTAL = 30;
+
 /**
  * Map provider StreamResults to Stremio streams: direct URLs → `{url}`,
  * everything else → `{externalUrl}` (Stremio opens it in the browser).
- * Playable streams are listed first; dedupes by URL, caps output so the
- * manifest response stays sane.
+ * Playable streams are listed first; dedupes by URL; caps rows per provider
+ * and in total. Streams that need extra headers (Referer-gated MP4s) are
+ * rewritten to the addon's local /proxy so the player needs no headers.
  */
 export function toStremioStreams(results: StreamResult[]): StremioStream[] {
   const seen = new Set<string>();
+  const perProvider = new Map<string, number>();
   const playable: StremioStream[] = [];
   const external: StremioStream[] = [];
 
   for (const r of results) {
     if (seen.has(r.url)) continue;
+    if ((perProvider.get(r.provider) ?? 0) >= MAX_PER_PROVIDER) continue;
+    if (playable.length + external.length >= MAX_TOTAL) break;
     seen.add(r.url);
+    perProvider.set(r.provider, (perProvider.get(r.provider) ?? 0) + 1);
 
     const title = streamTitle(r);
+    const hdrs = r.headers && Object.keys(r.headers).length > 0 ? r.headers : undefined;
     // resolvers may return extension-less media (signed token URLs) — they
     // attach playback headers exactly when they verified the target is media
-    if (isDirectUrl(r.url) || (r.headers && Object.keys(r.headers).length > 0)) {
-      const s: StremioStream = { name: r.provider, title, url: r.url };
-      const hdrs = r.headers && Object.keys(r.headers).length > 0 ? r.headers : undefined;
+    if (isDirectUrl(r.url) || hdrs) {
+      const s: StremioStream = {
+        name: r.provider,
+        title,
+        url: hdrs
+          ? proxyUrlFor(addonBaseUrl(), r.url, hdrs)
+          : r.url,
+      };
       if (hdrs) {
         s.headers = hdrs;
         s.behaviorHints = { proxyHeaders: hdrs, notWebReady: true };
@@ -139,7 +160,6 @@ export function toStremioStreams(results: StreamResult[]): StremioStream[] {
         externalUrl: r.url,
       });
     }
-    if (playable.length + external.length >= 30) break;
   }
   return [...playable, ...external];
 }

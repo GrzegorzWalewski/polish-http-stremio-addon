@@ -3,6 +3,7 @@ import { loadEnvFile } from 'movies-series-fetcher/lib';
 import { MANIFEST, parseStreamId, StreamIdError, streamResponse } from './stremio.js';
 import { getStreams, lastWarnings, streamCacheSize, UpstreamNotFoundError } from './handler.js';
 import { landingHtml } from './landing.js';
+import { handleProxy } from './proxy.js';
 
 loadEnvFile();
 
@@ -53,6 +54,11 @@ const server = http.createServer(async (req, res) => {
   }
 
   try {
+    if (path === '/proxy') {
+      await handleProxy(req, res, url);
+      return;
+    }
+
     if (path === '/' || path === '/landing') {
       sendHtml(res, landingHtml(`http://localhost:${PORT}`));
       return;

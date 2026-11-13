@@ -68,10 +68,15 @@ describe('toStremioStreams', () => {
     expect(streams).toHaveLength(1);
   });
 
-  it('caps output at 30', () => {
+  it('caps output at 30 (total) and 4 per provider', () => {
     const many = Array.from({ length: 50 }, (_, i) =>
       result({ url: `https://x.example/${i}.mp4` })
     );
-    expect(toStremioStreams(many)).toHaveLength(30);
+    expect(toStremioStreams(many)).toHaveLength(4);
+
+    const spread = Array.from({ length: 50 }, (_, i) =>
+      result({ url: `https://x.example/${i}.mp4`, provider: `prov${i}.example` })
+    );
+    expect(toStremioStreams(spread)).toHaveLength(30);
   });
 });
