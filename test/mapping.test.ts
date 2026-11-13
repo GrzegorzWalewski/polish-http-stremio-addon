@@ -32,7 +32,9 @@ describe('toStremioStreams', () => {
       result({ url: 'https://cdn.example/v.m3u8' }),
     ]);
     expect(streams).toHaveLength(1);
-    expect(streams[0].url).toBe('https://cdn.example/v.m3u8');
+    // playable rows route through the local proxy
+    expect(streams[0].url).toContain('/proxy?u=');
+    expect(streams[0].url).toContain(encodeURIComponent('https://cdn.example/v.m3u8'));
     expect(streams[0].externalUrl).toBeUndefined();
     expect(streams[0].title).toBe('cda.pl — 1080p — Lektor PL');
   });

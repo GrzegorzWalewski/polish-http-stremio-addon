@@ -141,12 +141,13 @@ export function toStremioStreams(results: StreamResult[]): StremioStream[] {
     // resolvers may return extension-less media (signed token URLs) — they
     // attach playback headers exactly when they verified the target is media
     if (isDirectUrl(r.url) || hdrs) {
+      // every playable row routes through the local proxy: header-gated
+      // media works without player support, and the resolver stage can
+      // pre-warm the first bytes for instant playback start
       const s: StremioStream = {
         name: r.provider,
         title,
-        url: hdrs
-          ? proxyUrlFor(addonBaseUrl(), r.url, hdrs)
-          : r.url,
+        url: proxyUrlFor(addonBaseUrl(), r.url, hdrs),
       };
       if (hdrs) {
         s.headers = hdrs;

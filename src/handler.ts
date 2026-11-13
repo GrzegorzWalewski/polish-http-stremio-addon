@@ -10,6 +10,7 @@ import {
   type StreamResult,
 } from 'movies-series-fetcher/lib';
 import { TtlCache, SingleFlight } from './cache.js';
+import { warmUp } from './proxy.js';
 import {
   StreamIdError,
   type ParsedStreamId,
@@ -113,9 +114,15 @@ async function runProviders(
  */
 async function resolveStage(results: StreamResult[]): Promise<StreamResult[]> {
   const tasks = results.map(async (r): Promise<StreamResult> => {
-    if (classifyStreamUrl(r.url) !== 'embed') return r;
+    if (classifyStreamUrl(r.url) !== 'embed') {
+      // already-direct progressive media also gets pre-warmed
+      warmUp(r.url);
+      return r;
+    }
     const resolved = await resolveEmbed(r.url, EMBED_TIMEOUT_MS);
     if (!resolved) return r;
+    // pre-fetch the first bytes now so the player starts on a warm cache
+    warmUp(resolved.url, resolved.headers);
     return {
       ...r,
       url: resolved.url,
