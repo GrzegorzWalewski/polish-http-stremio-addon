@@ -3,6 +3,8 @@ import {
   safeProviderSearch,
   resolveMediaDetailsFromImdb,
   resolveAbsoluteEpisode,
+  resolveEmbed,
+  classifyStreamUrl,
   TmdbAuthError,
   type MediaResult,
   type StreamResult,
@@ -16,6 +18,8 @@ import {
 } from './stremio.js';
 
 const PROVIDER_TIMEOUT_MS = 25_000;
+const EMBED_TIMEOUT_MS = 15_000;
+const RESOLVE_STAGE_BUDGET_MS = 20_000;
 const ABSOLUTE_EPISODE_TTL_MS = 6 * 60 * 60 * 1000;
 const SUCCESS_TTL_MS = 30 * 60 * 1000;
 const ALL_WARNED_TTL_MS = 5 * 60 * 1000;
@@ -97,6 +101,34 @@ async function runProviders(
 }
 
 /**
+ * Resolver stage: known hoster embeds → direct media URLs (concurrently,
+ * 15s each, hard stage budget 20s). Unresolved embeds and site pages keep
+ * their original URL (the addon maps them to external links).
+ */
+async function resolveStage(results: StreamResult[]): Promise<StreamResult[]> {
+  const tasks = results.map(async (r): Promise<StreamResult> => {
+    if (classifyStreamUrl(r.url) !== 'embed') return r;
+    const resolved = await resolveEmbed(r.url, EMBED_TIMEOUT_MS);
+    if (!resolved) return r;
+    return {
+      ...r,
+      url: resolved.url,
+      quality: resolved.quality ?? r.quality,
+      label: `resolved (${r.label ?? r.provider})`,
+    };
+  });
+
+  // resolveEmbed already enforces the per-embed timeout; the race guard
+  // only protects against a stuck resolveEmbed implementation
+  return Promise.race([
+    Promise.all(tasks),
+    new Promise<StreamResult[]>((resolve) =>
+      setTimeout(() => resolve(results), RESOLVE_STAGE_BUDGET_MS)
+    ),
+  ]);
+}
+
+/**
  * Full pipeline: parse → cache → TMDB (imdb) → absolute episode →
  * provider sweep → classify → map. Never rethrows provider errors —
  * they become warnings; only auth/id errors propagate as HTTP errors.
@@ -112,7 +144,8 @@ export async function getStreams(parsed: ParsedStreamId): Promise<StreamOutcome>
     if (!media) throw new UpstreamNotFoundError(parsed.imdbId);
 
     const { results, warnings } = await runProviders(media, parsed);
-    const outcome: StreamOutcome = { streams: toStremioStreams(results), warnings };
+    const resolved = await resolveStage(results);
+    const outcome: StreamOutcome = { streams: toStremioStreams(resolved), warnings };
 
     streamCache.set(cacheKey, outcome, results.length > 0 ? SUCCESS_TTL_MS : ALL_WARNED_TTL_MS);
     return outcome;
