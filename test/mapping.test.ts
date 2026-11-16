@@ -26,40 +26,62 @@ describe('toStremioStreams', () => {
     label: null,
     ...over,
   });
+  const meta = { name: 'Seksmisja', season: undefined, episode: undefined };
 
   it('maps direct URLs to {url}', () => {
-    const streams = toStremioStreams([
-      result({ url: 'https://cdn.example/v.m3u8' }),
-    ]);
+    const streams = toStremioStreams(
+      [result({ url: 'https://cdn.example/v.m3u8' })],
+      meta
+    );
     expect(streams).toHaveLength(1);
     // playable rows route through the local proxy
     expect(streams[0].url).toContain('/proxy?u=');
     expect(streams[0].url).toContain(encodeURIComponent('https://cdn.example/v.m3u8'));
     expect(streams[0].externalUrl).toBeUndefined();
-    expect(streams[0].title).toBe('cda.pl — 1080p — Lektor PL');
+    // left label: brand / quality / source
+    expect(streams[0].name).toBe('PolHTTP\n1080p\ncda.pl');
+    // right label: title / quality - language / source / audio / subtitles
+    expect(streams[0].title).toBe(
+      'Seksmisja\n1080p - Lektor PL\nSource: cda.pl\nAudio: Lektor PL\nSubtitles: None'
+    );
+  });
+
+  it('renders series titles with (SxxExx)', () => {
+    const streams = toStremioStreams(
+      [result({ url: 'https://site.pl/film/x' })],
+      { name: 'Wiedźmin', season: 2, episode: 1 }
+    );
+    expect(streams[0].title.startsWith('Wiedźmin (S02E01)\n')).toBe(true);
   });
 
   it('maps embed/page URLs to {externalUrl}', () => {
-    const streams = toStremioStreams([
-      result({ url: 'https://site.pl/film/x' }),
-    ]);
+    const streams = toStremioStreams(
+      [result({ url: 'https://site.pl/film/x' })],
+      meta
+    );
     expect(streams[0].externalUrl).toBe('https://site.pl/film/x');
     expect(streams[0].url).toBeUndefined();
     expect(streams[0].title).toContain('(open in browser)');
   });
 
-  it('appends [label] when present', () => {
-    const streams = toStremioStreams([
-      result({ label: 'Cda (Lektor PL)', url: 'https://cdn.example/a.mp4' }),
-    ]);
-    expect(streams[0].title).toBe('cda.pl — 1080p — Lektor PL [Cda (Lektor PL)]');
+  it('omits missing quality/language with — placeholders', () => {
+    const streams = toStremioStreams(
+      [result({ quality: null, language: null, url: 'https://cdn.example/v.mp4' })],
+      meta
+    );
+    expect(streams[0].name).toBe('PolHTTP\n—\ncda.pl');
+    expect(streams[0].title).toBe(
+      'Seksmisja\n—\nSource: cda.pl\nAudio: None\nSubtitles: None'
+    );
   });
 
-  it('omits missing quality/language', () => {
-    const streams = toStremioStreams([
-      result({ quality: null, language: null, url: 'https://cdn.example/v.mp4' }),
-    ]);
-    expect(streams[0].title).toBe('cda.pl');
+  it('maps napisy rows to original audio + Polish subtitles', () => {
+    const streams = toStremioStreams(
+      [result({ language: 'Napisy', url: 'https://cdn.example/v.mp4' })],
+      meta
+    );
+    expect(streams[0].title).toContain('Audio: Original');
+    expect(streams[0].title).toContain('Subtitles: Polish');
   });
 
   it('dedupes by url', () => {

@@ -10,10 +10,18 @@ services:
       PORT: 7777
       # compose network address — overrides the localhost value in .env
       FLARESOLVERR_URL: http://flaresolverr:8191
-    # TMDB token, filman cookies/UA etc. come from the fetcher's .env;
-    # environment entries above win over this file
+      # filman auto-session cache lives on a persistent volume (the session
+      # file is normally written next to .env — cwd differs in the container).
+      # The cached session is portable between the fetcher CLI and the addon:
+      # both FlareSolverr containers share the same image (→ same solver UA)
+      # and egress via the same public IP, so cf_clearance stays valid.
+      FILMAN_SESSION_FILE: /data/filman-session.json
+    # TMDB token, filman login/password + 2captcha key, filman cookies/UA etc.
+    # come from the fetcher's .env; environment entries above win over this file
     env_file:
       - ../movies-series-fetcher/.env
+    volumes:
+      - filman-session:/data
     depends_on:
       - flaresolverr
     restart: unless-stopped
@@ -31,3 +39,6 @@ services:
     # uncomment to reach FlareSolverr from the host (e.g. for msf CLI runs)
     # ports:
     #   - "8191:8191"
+
+volumes:
+  filman-session:

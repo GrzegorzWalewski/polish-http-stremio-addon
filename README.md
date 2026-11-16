@@ -43,8 +43,10 @@ npm start
 | Variable | Required | Purpose |
 |---|---|---|
 | `TMDB_READ_TOKEN` | yes | TMDB Read Access Token (JWT), imdb-id lookups |
-| `FLARESOLVERR_URL` | no | auto Cloudflare bypass (zaluknij, cda-hd) — e.g. `http://localhost:8191` |
-| `FILMAN_CC_COOKIE` / `FILMAN_CC_UA` | no | manual filman.cc session (see fetcher README) |
+| `FLARESOLVERR_URL` | no | auto Cloudflare bypass (zaluknij, cda-hd, filman daily rotation) — e.g. `http://localhost:8191` |
+| `FILMAN_CC_LOGIN` / `FILMAN_CC_PASSWORD` | no | filman.cc account for the auto-session (see fetcher README) |
+| `TWOCAPTCHA_API_KEY` | no | 2captcha.com key — solves filman's reCAPTCHA only when its session expires (rare; cached in `.filman-session.json`) |
+| `FILMAN_CC_COOKIE` / `FILMAN_CC_UA` | no | manual filman.cc session fallback, ignored while auto-session is configured |
 | `PORT` | no | HTTP port (default 7777) |
 
 ## Endpoints
@@ -76,7 +78,11 @@ stream requests (Cloudflare walls, geo-blocks, captchas). Errors are JSON:
 
 - Per-provider timeout is **25s** — filman.cc's rate-limit sleep (~60s)
   usually gets cut and shows up as a warning; query filman from the CLI
-  instead when you need it.
+  instead when you need it. The same applies to the filman auto-session's
+  first bootstrap (FlareSolverr + captcha login, ~1–2 min): a fresh
+  `.filman-session.json` is best created by running one search from the
+  fetcher CLI first; afterwards the cached session keeps the addon's filman
+  requests fast.
 - Hosts whose embeds can't be resolved degrade to external links
   automatically (hoster obfuscation changes often).
 - Sites that are login/geo-gated (mm35, freedisc) or article-based (virpe)

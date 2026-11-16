@@ -15,6 +15,7 @@ import {
   StreamIdError,
   type ParsedStreamId,
   type StremioStream,
+  type StreamMeta,
   toStremioStreams,
 } from './stremio.js';
 
@@ -159,7 +160,12 @@ export async function getStreams(parsed: ParsedStreamId): Promise<StreamOutcome>
 
     const { results, warnings } = await runProviders(media, parsed);
     const resolved = await resolveStage(results);
-    const outcome: StreamOutcome = { streams: toStremioStreams(resolved), warnings };
+    const meta: StreamMeta = {
+      name: media.plTitle,
+      season: parsed.season,
+      episode: parsed.episode,
+    };
+    const outcome: StreamOutcome = { streams: toStremioStreams(resolved, meta), warnings };
 
     streamCache.set(cacheKey, outcome, results.length > 0 ? SUCCESS_TTL_MS : ALL_WARNED_TTL_MS);
     return outcome;

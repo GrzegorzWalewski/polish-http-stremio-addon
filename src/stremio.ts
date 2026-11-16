@@ -2,7 +2,7 @@ import type { StreamResult } from 'movies-series-fetcher/lib';
 import { proxyUrlFor } from './proxy.js';
 
 export const ADDON_ID = 'community.polish-streams-addon';
-export const ADDON_VERSION = '1.0.6';
+export const ADDON_VERSION = '1.0.7';
 
 /** Base URL of this addon's own server (used for stream proxying). */
 export function addonBaseUrl(): string {
@@ -113,10 +113,33 @@ export function isDirectUrl(url: string): boolean {
   return /\.(m3u8|mpd|mp4|mkv|avi|webm)(\?|#|$)/i.test(url);
 }
 
-function streamTitle(r: StreamResult): string {
-  const parts = [r.provider, r.quality, r.language].filter(Boolean) as string[];
-  const base = parts.join(' — ');
-  return r.label ? `${base} [${r.label}]` : base;
+/** Media context used to render the stream description (right side). */
+export interface StreamMeta {
+  /** movie / series title (Polish) */
+  name: string;
+  season?: number;
+  episode?: number;
+}
+
+const pad2 = (n: number): string => String(n).padStart(2, '0');
+
+/**
+ * Polish-language conventions on the sites → audio/subtitle metadata.
+ * Only a single `language` tag exists per row, so this is best-effort:
+ *  - "Lektor PL" = Polish voice-over track (no subtitles)
+ *  - "Napisy PL" = original audio + Polish subtitles
+ *  - "Dubbing"   = Polish dub track
+ *  - "Polski"    = Polish audio
+ *  - anything else / empty = no known metadata
+ */
+export function audioSubsFromLanguage(language: string | null): { audio: string; subs: string } {
+  const l = (language ?? '').toLowerCase();
+  if (l.includes('napisy')) return { audio: 'Original', subs: 'Polish' };
+  if (l.includes('lektor')) return { audio: 'Lektor PL', subs: 'None' };
+  if (l.includes('dubb')) return { audio: 'Dubbing PL', subs: 'None' };
+  if (l.includes('polski') || l.includes('polish')) return { audio: 'Polish', subs: 'None' };
+  if (l) return { audio: 'Original', subs: 'None' };
+  return { audio: 'None', subs: 'None' };
 }
 
 /** Rows kept per provider — some emit dozens of near-identical variants. */
@@ -130,11 +153,36 @@ const MAX_TOTAL = 30;
  * and in total. Streams that need extra headers (Referer-gated MP4s) are
  * rewritten to the addon's local /proxy so the player needs no headers.
  */
-export function toStremioStreams(results: StreamResult[]): StremioStream[] {
+export function toStremioStreams(results: StreamResult[], meta?: StreamMeta): StremioStream[] {
   const seen = new Set<string>();
   const perProvider = new Map<string, number>();
   const playable: StremioStream[] = [];
   const external: StremioStream[] = [];
+
+  // left (bold) label: addon brand / quality / source site
+  const leftLabel = (r: StreamResult): string =>
+    `PolHTTP\n${r.quality ?? '—'}\n${r.provider}`;
+
+  // right (description) label: title (SxxExx) / quality - language /
+  // source / audio / subtitles
+  const rightLabel = (r: StreamResult): string => {
+    const se =
+      meta && meta.season && meta.episode
+        ? ` (S${pad2(meta.season)}E${pad2(meta.episode)})`
+        : '';
+    const qLang =
+      [r.quality, r.language].filter(Boolean).join(' - ') || '—';
+    const { audio, subs } = audioSubsFromLanguage(r.language);
+    return [
+      meta ? `${meta.name}${se}` : null,
+      qLang,
+      `Source: ${r.provider}`,
+      `Audio: ${audio}`,
+      `Subtitles: ${subs}`,
+    ]
+      .filter(Boolean)
+      .join('\n');
+  };
 
   for (const r of results) {
     if (seen.has(r.url)) continue;
@@ -143,7 +191,6 @@ export function toStremioStreams(results: StreamResult[]): StremioStream[] {
     seen.add(r.url);
     perProvider.set(r.provider, (perProvider.get(r.provider) ?? 0) + 1);
 
-    const title = streamTitle(r);
     const hdrs = r.headers && Object.keys(r.headers).length > 0 ? r.headers : undefined;
     // resolvers may return extension-less media (signed token URLs) — they
     // attach playback headers exactly when they verified the target is media
@@ -152,15 +199,15 @@ export function toStremioStreams(results: StreamResult[]): StremioStream[] {
       // media works without player support, and the resolver stage can
       // pre-warm the first bytes for instant playback start
       const s: StremioStream = {
-        name: r.provider,
-        title,
+        name: leftLabel(r),
+        title: rightLabel(r),
         url: proxyUrlFor(addonBaseUrl(), r.url, hdrs),
       };
       playable.push(s);
     } else {
       external.push({
-        name: r.provider,
-        title: `${title} (open in browser)`,
+        name: leftLabel(r),
+        title: `${rightLabel(r)}\n(open in browser)`,
         externalUrl: r.url,
       });
     }
