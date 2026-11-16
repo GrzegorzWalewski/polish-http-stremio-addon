@@ -2,7 +2,7 @@ import type { StreamResult } from 'movies-series-fetcher/lib';
 import { proxyUrlFor } from './proxy.js';
 
 export const ADDON_ID = 'community.polish-streams-addon';
-export const ADDON_VERSION = '1.0.4';
+export const ADDON_VERSION = '1.0.5';
 
 /** Base URL of this addon's own server (used for stream proxying). */
 export function addonBaseUrl(): string {
@@ -54,10 +54,17 @@ export interface ParsedStreamId {
 /**
  * Strict id parsing: `/stream/movie/tt0083564.json`,
  * `/stream/series/tt0903747:2:1.json`. Series without both season and
- * episode is rejected (Stremio always sends them).
+ * episode is rejected (Stremio always sends them). The id segment may be
+ * percent-encoded (Stremio encodes the colons: `tt123%3A1%3A1`) — it is
+ * decoded before matching; malformed escapes fall back to the raw value.
  */
 export function parseStreamId(kind: string, raw: string): ParsedStreamId {
-  const rest = raw.replace(/\.json$/i, '');
+  let rest = raw.replace(/\.json$/i, '');
+  try {
+    rest = decodeURIComponent(rest);
+  } catch {
+    /* keep raw */
+  }
 
   if (kind === 'movie') {
     const m = /^(tt\d+)$/.exec(rest);

@@ -22,6 +22,19 @@ describe('parseStreamId', () => {
     expect(parseStreamId('series', 'tt5180501:1:5').imdbId).toBe('tt5180501');
   });
 
+  it('parses percent-encoded series ids (Stremio encodes the colons)', () => {
+    expect(parseStreamId('series', 'tt14129378%3A1%3A1.json')).toEqual({
+      type: 'series',
+      imdbId: 'tt14129378',
+      season: 1,
+      episode: 1,
+    });
+  });
+
+  it('rejects ids with malformed percent-escapes', () => {
+    expect(() => parseStreamId('series', 'tt123%ZZ:1:1')).toThrow(StreamIdError);
+  });
+
   it('rejects series ids missing season/episode', () => {
     expect(() => parseStreamId('series', 'tt0903747.json')).toThrow(StreamIdError);
     expect(() => parseStreamId('series', 'tt0903747:2.json')).toThrow(StreamIdError);
