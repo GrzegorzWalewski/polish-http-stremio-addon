@@ -53,6 +53,10 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (path !== '/proxy') {
+    console.log(`${new Date().toISOString()} ${req.method} ${path}${url.search}`);
+  }
+
   try {
     if (path === '/proxy') {
       await handleProxy(req, res, url);

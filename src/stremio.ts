@@ -2,7 +2,7 @@ import type { StreamResult } from 'movies-series-fetcher/lib';
 import { proxyUrlFor } from './proxy.js';
 
 export const ADDON_ID = 'community.polish-streams-addon';
-export const ADDON_VERSION = '1.0.0';
+export const ADDON_VERSION = '1.0.4';
 
 /** Base URL of this addon's own server (used for stream proxying). */
 export function addonBaseUrl(): string {
@@ -149,10 +149,6 @@ export function toStremioStreams(results: StreamResult[]): StremioStream[] {
         title,
         url: proxyUrlFor(addonBaseUrl(), r.url, hdrs),
       };
-      if (hdrs) {
-        s.headers = hdrs;
-        s.behaviorHints = { proxyHeaders: hdrs, notWebReady: true };
-      }
       playable.push(s);
     } else {
       external.push({

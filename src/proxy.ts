@@ -42,6 +42,43 @@ function isProgressiveMedia(url: string): boolean {
 }
 
 /**
+ * Per-host upstream connection limiter. Some hosters (maxvod's CDN, similar
+ * get_file MP4 servers) allow only 2 concurrent connections per client IP —
+ * every extra connection gets an instant 503. Players issue parallel range
+ * requests (moov-atom tail probe + head + retries), which trips the cap and
+ * playback stalls forever. Queue per host instead: excess requests wait for
+ * a free slot, aborted client requests release theirs immediately.
+ */
+const MAX_UPSTREAM_PER_HOST = 2;
+
+interface HostSlot {
+  active: number;
+  queue: (() => void)[];
+}
+
+const hostSlots = new Map<string, HostSlot>();
+
+async function withHostSlot<T>(host: string, fn: () => Promise<T>): Promise<T> {
+  let s = hostSlots.get(host);
+  if (!s) {
+    s = { active: 0, queue: [] };
+    hostSlots.set(host, s);
+  }
+  const slot = s;
+  await new Promise<void>((grant) => {
+    if (slot.active < MAX_UPSTREAM_PER_HOST) grant();
+    else slot.queue.push(grant);
+  });
+  slot.active++;
+  try {
+    return await fn();
+  } finally {
+    slot.active--;
+    slot.queue.shift()?.();
+  }
+}
+
+/**
  * Fire-and-forget pre-fetch of the first PREFETCH_BYTES of a progressive
  * media URL. Called from the resolver stage the moment a stream is known —
  * the player then starts on locally cached bytes instead of a cold CDN.
@@ -50,7 +87,7 @@ export function warmUp(target: string, headers?: Record<string, string>): void {
   if (!isProgressiveMedia(target) || warmFresh(warm.get(target))) return;
   warm.delete(target);
 
-  void (async () => {
+  void withHostSlot(new URL(target).host, async () => {
     const res = await fetch(target, {
       headers: {
         'accept-encoding': 'identity',
@@ -70,6 +107,9 @@ export function warmUp(target: string, headers?: Record<string, string>): void {
       got += buf.length;
       if (got >= PREFETCH_BYTES) break;
     }
+    // cancel the body — without this the connection (and its hoster
+    // concurrency slot) stays open for the stream's lifetime
+    await res.body?.cancel();
     const total = Number(/\/(\d+)$/.exec(res.headers.get('content-range') ?? '')?.[1]) ||
       Number(res.headers.get('content-length')) || null;
     warm.set(target, {
@@ -79,7 +119,7 @@ export function warmUp(target: string, headers?: Record<string, string>): void {
       data: Buffer.concat(chunks),
       at: Date.now(),
     });
-  })().catch(() => {
+  }).catch(() => {
     /* warm-up is best-effort — normal proxy path still works */
   });
 }
@@ -263,12 +303,14 @@ export async function handleProxy(
     }
     // remainder streams live from the CDN starting after the cached chunk
     try {
-      const rest = await fetchUpstream(parsed, {
-        ...headers,
-        Range: `bytes=${entry.data.length}-`,
+      served += await withHostSlot(parsed.host, async () => {
+        const rest = await fetchUpstream(parsed, {
+          ...headers,
+          Range: `bytes=${entry.data.length}-`,
+        });
+        return await pipeBody(rest.body, res);
       });
-      served += await pipeBody(rest.body, res);
-      logProxy(parsed, req, rest.status, served, performance.now() - t0, '(warm splice)');
+      logProxy(parsed, req, 206, served, performance.now() - t0, '(warm splice)');
     } catch (err) {
       logProxy(parsed, req, 'ERR', served, performance.now() - t0, `(splice failed: ${(err as Error).message})`);
       res.end();
@@ -276,63 +318,65 @@ export async function handleProxy(
     return;
   }
 
-  // ---- normal path: fetch and stream through ----
-  let upstream: Response;
-  try {
-    upstream = await fetchUpstream(parsed, headers);
-  } catch (err) {
-    logProxy(parsed, req, 'ERR', 0, performance.now() - t0, `(upstream failed: ${(err as Error).message})`);
-    res.writeHead(502, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'upstream fetch failed' }));
-    return;
-  }
+  // ---- normal path: fetch and stream through (host-slot limited) ----
+  await withHostSlot(parsed.host, async () => {
+    let upstream: Response;
+    try {
+      upstream = await fetchUpstream(parsed, headers);
+    } catch (err) {
+      logProxy(parsed, req, 'ERR', 0, performance.now() - t0, `(upstream failed: ${(err as Error).message})`);
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'upstream fetch failed' }));
+      return;
+    }
 
-  const out: http.OutgoingHttpHeaders = {};
-  for (const name of ['content-type', 'content-length', 'content-range']) {
-    const v = upstream.headers.get(name);
-    if (v) out[name] = v;
-  }
-  out['accept-ranges'] = 'bytes';
+    const out: http.OutgoingHttpHeaders = {};
+    for (const name of ['content-type', 'content-length', 'content-range']) {
+      const v = upstream.headers.get(name);
+      if (v) out[name] = v;
+    }
+    out['accept-ranges'] = 'bytes';
 
-  // HLS playlists: rewrite relative URIs so segments keep flowing through
-  // the proxy (or straight to the CDN when the playlist uses absolute URIs)
-  const ct = upstream.headers.get('content-type') ?? '';
-  const isHls =
-    HLS_CT_RE.test(ct) || /\.m3u8(\?|#|$)/i.test(parsed.pathname + parsed.search);
-  if (isHls && upstream.ok && upstream.body) {
-    const text = await upstream.text();
-    const body = rewritePlaylist(
-      text,
-      parsed,
-      selfBaseUrl(req),
-      url.searchParams.get('h')
-    );
-    delete out['content-range'];
-    out['content-length'] = String(Buffer.byteLength(body));
-    res.writeHead(upstream.status, out);
-    res.end(body);
-    logProxy(parsed, req, upstream.status, Buffer.byteLength(body), performance.now() - t0, '(playlist)');
-    return;
-  }
+    // HLS playlists: rewrite relative URIs so segments keep flowing through
+    // the proxy (or straight to the CDN when the playlist uses absolute URIs)
+    const ct = upstream.headers.get('content-type') ?? '';
+    const isHls =
+      HLS_CT_RE.test(ct) || /\.m3u8(\?|#|$)/i.test(parsed.pathname + parsed.search);
+    if (isHls && upstream.ok && upstream.body) {
+      const text = await upstream.text();
+      const body = rewritePlaylist(
+        text,
+        parsed,
+        selfBaseUrl(req),
+        url.searchParams.get('h')
+      );
+      delete out['content-range'];
+      out['content-length'] = String(Buffer.byteLength(body));
+      res.writeHead(upstream.status, out);
+      res.end(body);
+      logProxy(parsed, req, upstream.status, Buffer.byteLength(body), performance.now() - t0, '(playlist)');
+      return;
+    }
 
-  // hoster gate / error page: fail fast instead of letting the player try
-  // to demux HTML (which shows as endless buffering)
-  if (/^text\/html/i.test(ct) && upstream.ok) {
-    await upstream.body?.cancel();
-    logProxy(parsed, req, upstream.status, 0, performance.now() - t0, '(html — gated?)');
-    res.writeHead(502, { 'Content-Type': 'text/plain' });
-    res.end('upstream returned an html page, not media');
-    return;
-  }
+    // hoster gate / error page: fail fast instead of letting the player try
+    // to demux HTML (which shows as endless buffering)
+    if (/^text\/html/i.test(ct) && upstream.ok) {
+      await upstream.body?.cancel();
+      logProxy(parsed, req, upstream.status, 0, performance.now() - t0, '(html — gated?)');
+      res.writeHead(502, { 'Content-Type': 'text/plain' });
+      res.end('upstream returned an html page, not media');
+      return;
+    }
 
-  if (upstream.status >= 400) {
-    await upstream.body?.cancel();
-    logProxy(parsed, req, upstream.status, 0, performance.now() - t0);
-    res.writeHead(upstream.status, out);
-    res.end();
-    return;
-  }
+    if (upstream.status >= 400) {
+      await upstream.body?.cancel();
+      logProxy(parsed, req, upstream.status, 0, performance.now() - t0);
+      res.writeHead(upstream.status, out);
+      res.end();
+      return;
+    }
 
-  const served = await pipeBody(upstream.body, res);
-  logProxy(parsed, req, upstream.status, served, performance.now() - t0);
+    const served = await pipeBody(upstream.body, res);
+    logProxy(parsed, req, upstream.status, served, performance.now() - t0);
+  });
 }
