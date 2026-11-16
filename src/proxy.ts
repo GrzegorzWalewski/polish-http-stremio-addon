@@ -376,6 +376,7 @@ export async function handleProxy(
       return;
     }
 
+    res.writeHead(upstream.status, out);
     const served = await pipeBody(upstream.body, res);
     logProxy(parsed, req, upstream.status, served, performance.now() - t0);
   });
