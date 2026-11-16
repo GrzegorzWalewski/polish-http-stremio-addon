@@ -128,6 +128,10 @@ async function runProviders(
  * their original URL (the addon maps them to external links).
  */
 async function resolveStage(results: StreamResult[]): Promise<StreamResult[]> {
+  const t0 = performance.now();
+  const host = (u: string): string => new URL(u).host;
+  let resolvedCount = 0;
+
   const tasks = results.map(async (r): Promise<StreamResult> => {
     if (classifyStreamUrl(r.url) !== 'embed') {
       // already-direct progressive media also gets pre-warmed (with its
@@ -135,8 +139,19 @@ async function resolveStage(results: StreamResult[]): Promise<StreamResult[]> {
       warmUp(r.url, r.headers);
       return r;
     }
+    const rt0 = performance.now();
     const resolved = await resolveEmbed(r.url, EMBED_TIMEOUT_MS);
-    if (!resolved) return r;
+    const ms = Math.round(performance.now() - rt0);
+    if (!resolved) {
+      console.log(
+        `${new Date().toISOString()} resolve MISS ${host(r.url)} ${ms}ms (external link)`
+      );
+      return r;
+    }
+    resolvedCount++;
+    console.log(
+      `${new Date().toISOString()} resolve OK   ${host(r.url)} ${ms}ms -> ${host(resolved.url)}`
+    );
     // pre-fetch the first bytes now so the player starts on a warm cache
     warmUp(resolved.url, resolved.headers);
     return {
@@ -150,12 +165,17 @@ async function resolveStage(results: StreamResult[]): Promise<StreamResult[]> {
 
   // resolveEmbed already enforces the per-embed timeout; the race guard
   // only protects against a stuck resolveEmbed implementation
-  return Promise.race([
+  const out = await Promise.race([
     Promise.all(tasks),
     new Promise<StreamResult[]>((resolve) =>
       setTimeout(() => resolve(results), RESOLVE_STAGE_BUDGET_MS)
     ),
   ]);
+  const embeds = results.filter((r) => classifyStreamUrl(r.url) === 'embed').length;
+  console.log(
+    `${new Date().toISOString()} resolve stage: ${resolvedCount}/${embeds} embeds resolved in ${Math.round(performance.now() - t0)}ms`
+  );
+  return out;
 }
 
 /**
