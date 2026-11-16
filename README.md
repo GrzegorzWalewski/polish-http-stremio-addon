@@ -79,13 +79,14 @@ stream requests (Cloudflare walls, geo-blocks, captchas). Errors are JSON:
 
 ## Notes / limits
 
-- Per-provider timeout is **25s** — filman.cc's rate-limit sleep (~60s)
-  usually gets cut and shows up as a warning; query filman from the CLI
-  instead when you need it. The same applies to the filman auto-session's
-  first bootstrap (FlareSolverr + captcha login, ~1–2 min): a fresh
-  `.filman-session.json` is best created by running one search from the
-  fetcher CLI first; afterwards the cached session keeps the addon's filman
-  requests fast.
+- Per-provider timeout is **60s** — sized to fit a FlareSolverr Cloudflare
+  solve (30–40s+ on weak CPUs) and filman.cc's rate-limit sleep (~60s). A
+  cold request (cache miss, CF cookies expired) can take up to that long;
+  results are cached for 30 min and solved CF cookies are persisted to disk,
+  so steady-state requests are fast. The filman auto-session's first
+  bootstrap (FlareSolverr + captcha login, ~1–2 min) still benefits from
+  priming via one search from the fetcher CLI; afterwards the cached session
+  keeps the addon's filman requests fast.
 - Hosts whose embeds can't be resolved degrade to external links
   automatically (hoster obfuscation changes often).
 - Sites that are login/geo-gated (mm35, freedisc) or article-based (virpe)

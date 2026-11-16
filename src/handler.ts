@@ -19,7 +19,13 @@ import {
   toStremioStreams,
 } from './stremio.js';
 
-const PROVIDER_TIMEOUT_MS = 25_000;
+/**
+ * Must exceed a FlareSolverr CF solve (~15s fast CPU, 30-40s+ on weak boxes):
+ * a timeout that fires mid-solve prevents the solved cookies from being
+ * cached, so every cold request re-pays the solve. filman's 60s rate-limit
+ * sleep also fits under this budget now.
+ */
+const PROVIDER_TIMEOUT_MS = 60_000;
 const EMBED_TIMEOUT_MS = 15_000;
 const RESOLVE_STAGE_BUDGET_MS = 20_000;
 const ABSOLUTE_EPISODE_TTL_MS = 6 * 60 * 60 * 1000;
@@ -116,8 +122,9 @@ async function runProviders(
 async function resolveStage(results: StreamResult[]): Promise<StreamResult[]> {
   const tasks = results.map(async (r): Promise<StreamResult> => {
     if (classifyStreamUrl(r.url) !== 'embed') {
-      // already-direct progressive media also gets pre-warmed
-      warmUp(r.url);
+      // already-direct progressive media also gets pre-warmed (with its
+      // headers — cda/freedisc CDNs reject header-less prefetches)
+      warmUp(r.url, r.headers);
       return r;
     }
     const resolved = await resolveEmbed(r.url, EMBED_TIMEOUT_MS);
