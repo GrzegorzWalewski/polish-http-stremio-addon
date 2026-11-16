@@ -48,8 +48,11 @@ npm start
 | `TWOCAPTCHA_API_KEY` | no | 2captcha.com key — solves filman's reCAPTCHA only when its session expires (rare; cached in `.filman-session.json`) |
 | `FILMAN_CC_COOKIE` / `FILMAN_CC_UA` | no | manual filman.cc session fallback, ignored while auto-session is configured |
 | `PORT` | no | HTTP port (default 7777) |
+| `ADDON_PUBLIC_URL` | no | public base URL (e.g. `https://polhttp.example.com`) — required with the Caddy setup so proxied stream URLs point at the domain, not `localhost` |
 
 ## Endpoints
+
+Install URL: `http://<server-ip>:7777/manifest.json` (localhost only — Stremio requires HTTPS for anything else, see below).
 
 - `/` — install landing page
 - `/manifest.json` — Stremio manifest (`stream` resource, `movie` + `series`, `tt` prefix)
@@ -87,3 +90,29 @@ stream requests (Cloudflare walls, geo-blocks, captchas). Errors are JSON:
   automatically (hoster obfuscation changes often).
 - Sites that are login/geo-gated (mm35, freedisc) or article-based (virpe)
   always return external links.
+
+## HTTPS (Caddy sidecar)
+
+Stremio only accepts plain-HTTP addon URLs on `localhost`; any other address
+needs HTTPS. The compose file includes a Caddy sidecar that terminates TLS and
+proxies to the addon, using a **Cloudflare DNS-01 challenge** — so no inbound
+port 80 is needed and the server can stay LAN-only.
+
+1. Create a DNS A record in your Cloudflare zone pointing a hostname
+   (e.g. `polhttp.example.com`) at your server, **grey-cloud** (DNS only).
+2. Create a Cloudflare API token with `Zone → DNS → Edit` permission for that
+   zone and put it in a **project-local gitignored `.env`** (this is separate
+   from the fetcher's `.env`):
+   ```
+   CLOUDFLARE_API_TOKEN=your-token
+   ```
+3. Replace `polhttp.example.com` in the `Caddyfile` with your hostname, add
+   `ADDON_PUBLIC_URL: https://polhttp.example.com` to the addon service's
+   `environment:` in `docker-compose.yml`, and `docker compose up -d --build`
+   as usual. Certificates renew automatically.
+
+Install URL becomes: `https://polhttp.example.com/manifest.json`.
+
+The Caddy image is built with the `caddy-dns/cloudflare` module
+(`Dockerfile.caddy`, two-stage xcaddy build); cert data persists in the
+`caddy-data` volume.

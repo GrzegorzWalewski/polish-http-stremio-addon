@@ -1,0 +1,7 @@
+# Replace with the hostname that resolves to your server (grey-cloud DNS record).
+polhttp.example.com {
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+	}
+	reverse_proxy addon:7777
+}

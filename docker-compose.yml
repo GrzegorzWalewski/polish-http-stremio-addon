@@ -8,6 +8,8 @@ services:
       - "7777:7777"
     environment:
       PORT: 7777
+      # uncomment when the Caddy HTTPS setup is live (see README):
+      # ADDON_PUBLIC_URL: https://polhttp.example.com
       # compose network address — overrides the localhost value in .env
       FLARESOLVERR_URL: http://flaresolverr:8191
       # filman auto-session cache lives on a persistent volume (the session
@@ -31,6 +33,25 @@ services:
       timeout: 5s
       retries: 3
 
+  # HTTPS front for LAN/LAN-external access — Stremio requires https for any
+  # non-localhost addon URL. DNS-01 cert issuance needs no inbound port 80.
+  # CLOUDFLARE_API_TOKEN comes from this project's gitignored .env.
+  caddy:
+    build:
+      context: .
+      dockerfile: Dockerfile.caddy
+    ports:
+      - "443:443"
+    environment:
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:?Set CLOUDFLARE_API_TOKEN in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - addon
+    restart: unless-stopped
+
   flaresolverr:
     image: ghcr.io/flaresolverr/flaresolverr:v3.5.2
     environment:
@@ -42,3 +63,5 @@ services:
 
 volumes:
   filman-session:
+  caddy-data:
+  caddy-config:

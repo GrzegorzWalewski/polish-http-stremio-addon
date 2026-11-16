@@ -2,10 +2,17 @@ import type { StreamResult } from 'movies-series-fetcher/lib';
 import { proxyUrlFor } from './proxy.js';
 
 export const ADDON_ID = 'community.polish-streams-addon';
-export const ADDON_VERSION = '1.0.7';
+export const ADDON_VERSION = '1.0.8';
 
-/** Base URL of this addon's own server (used for stream proxying). */
+/**
+ * Base URL of this addon's own server (used for stream proxying).
+ * Set ADDON_PUBLIC_URL when the addon is reached from other devices
+ * (e.g. https://polhttp.example.com) — proxied stream URLs are absolute,
+ * so `localhost` would break remote clients.
+ */
 export function addonBaseUrl(): string {
+  const pub = process.env.ADDON_PUBLIC_URL?.trim();
+  if (pub) return pub.replace(/\/+$/, '');
   return `http://localhost:${process.env.PORT ?? 7777}`;
 }
 
