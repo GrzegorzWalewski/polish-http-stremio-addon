@@ -142,18 +142,25 @@ export function proxyUrlFor(
 
 const HLS_CT_RE = /mpegurl/i;
 
-/** Base URL of this server as the calling player sees it. */
+/**
+ * Base URL of this server as the calling player sees it. When Caddy (or any
+ * TLS front) proxies to us it sets X-Forwarded-Proto — without it playlist
+ * rewrites would embed `http://domain/...` URLs on port 80, which is
+ * unreachable when only 443 is exposed, and playback stalls forever.
+ */
 function selfBaseUrl(req: http.IncomingMessage): string {
-  return `http://${req.headers.host ?? `localhost:${process.env.PORT ?? 7777}`}`;
+  const host = req.headers.host ?? `localhost:${process.env.PORT ?? 7777}`;
+  const proto = req.headers['x-forwarded-proto']?.toString().split(',')[0].trim() || 'http';
+  return `${proto}://${host}`;
 }
 
 /**
- * Rewrite relative URIs in an HLS playlist to absolute proxy URLs. Without
- * this, a player resolving `seg_00001.ts` against
- * `http://localhost:7777/proxy?u=...` hits the addon router instead of the
- * proxy and the stream breaks. Absolute URIs (byse variant playlists point
- * straight at their CDN) are left untouched — those segments flow directly,
- * which is faster than looping through localhost.
+ * Rewrite every URI in an HLS playlist (relative and absolute) to a proxy
+ * URL on this server. Without this, a player resolving `seg_00001.ts`
+ * against `http://localhost:7777/proxy?u=...` hits the addon router instead
+ * of the proxy and the stream breaks; CDN-absolute URIs are rewritten too —
+ * their signed queries are often IP/ASN-bound (byse: `asn=`), so a client on
+ * a different network fetching them directly gets rejected and stalls.
  */
 function rewritePlaylist(
   body: string,

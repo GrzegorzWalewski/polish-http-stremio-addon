@@ -2,7 +2,7 @@ import type { StreamResult } from 'movies-series-fetcher/lib';
 import { proxyUrlFor } from './proxy.js';
 
 export const ADDON_ID = 'community.polish-streams-addon';
-export const ADDON_VERSION = '1.0.8';
+export const ADDON_VERSION = '1.0.10';
 
 /**
  * Base URL of this addon's own server (used for stream proxying).
@@ -146,7 +146,9 @@ export function audioSubsFromLanguage(language: string | null): { audio: string;
   if (l.includes('dubb')) return { audio: 'Dubbing PL', subs: 'None' };
   if (l.includes('polski') || l.includes('polish')) return { audio: 'Polish', subs: 'None' };
   if (l) return { audio: 'Original', subs: 'None' };
-  return { audio: 'None', subs: 'None' };
+  // no language tag: the sources are Polish streaming sites, so Polish is
+  // the overwhelmingly likely default
+  return { audio: 'Polish', subs: 'None' };
 }
 
 /** Rows kept per provider — some emit dozens of near-identical variants. */

@@ -71,8 +71,16 @@ describe('toStremioStreams', () => {
     );
     expect(streams[0].name).toBe('PolHTTP\n—\ncda.pl');
     expect(streams[0].title).toBe(
-      'Seksmisja\n—\nSource: cda.pl\nAudio: None\nSubtitles: None'
+      'Seksmisja\n—\nSource: cda.pl\nAudio: Polish\nSubtitles: None'
     );
+  });
+
+  it('assumes Polish audio when language is undetected', () => {
+    const streams = toStremioStreams(
+      [result({ quality: null, language: null, url: 'https://cdn.example/v.mp4' })],
+      meta
+    );
+    expect(streams[0].title).toContain('Audio: Polish');
   });
 
   it('maps napisy rows to original audio + Polish subtitles', () => {
