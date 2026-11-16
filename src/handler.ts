@@ -89,8 +89,9 @@ async function runProviders(
       : undefined;
 
   const attempts = await Promise.all(
-    providers.map((prov) =>
-      safeProviderSearch(
+    providers.map(async (prov) => {
+      const t0 = performance.now();
+      const a = await safeProviderSearch(
         prov.name,
         () =>
           prov.search({
@@ -105,8 +106,12 @@ async function runProviders(
             absoluteEpisode,
           }),
         PROVIDER_TIMEOUT_MS
-      )
-    )
+      );
+      console.log(
+        `${new Date().toISOString()} provider ${prov.name} -> ${a.results.length} rows ${Math.round(performance.now() - t0)}ms${a.warning ? ` (warn: ${a.warning.slice(0, 80)})` : ''}`
+      );
+      return a;
+    })
   );
 
   const warnings = attempts.map((a) => a.warning).filter((w): w is string => !!w);
