@@ -29,8 +29,8 @@ const PROVIDER_TIMEOUT_MS = 60_000;
 /** Embed resolvers that need longer than this rarely succeed at all —
  * unresolved embeds degrade to external links, so it's better to answer
  * fast than to burn the stage budget on a stuck hoster. */
-const EMBED_TIMEOUT_MS = 8_000;
-const RESOLVE_STAGE_BUDGET_MS = 12_000;
+const EMBED_TIMEOUT_MS = 5_000;
+const RESOLVE_STAGE_BUDGET_MS = 8_000;
 const ABSOLUTE_EPISODE_TTL_MS = 6 * 60 * 60 * 1000;
 const SUCCESS_TTL_MS = 30 * 60 * 1000;
 const ALL_WARNED_TTL_MS = 5 * 60 * 1000;
