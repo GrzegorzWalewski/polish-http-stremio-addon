@@ -161,27 +161,42 @@ function selfBaseUrl(req: http.IncomingMessage): string {
  * of the proxy and the stream breaks; CDN-absolute URIs are rewritten too —
  * their signed queries are often IP/ASN-bound (byse: `asn=`), so a client on
  * a different network fetching them directly gets rejected and stalls.
+ *
+ * URIs also live INSIDE tag attributes: `#EXT-X-MAP:URI="init.mp4"` (cda's
+ * byte-range VODs), `#EXT-X-MEDIA:URI="audio.m3u8"` (demuxed audio), keys,
+ * i-frame playlists. An unrewritten relative attribute resolves against the
+ * proxy URL and 404s — the player "plays" from the first second but shows
+ * no video and no audio.
  */
-function rewritePlaylist(
+const TAG_URI_RE = /URI="([^"]+)"/g;
+
+export function rewritePlaylist(
   body: string,
   upstream: URL,
   baseUrl: string,
   h: string | null
 ): string {
+  const rewriteUri = (uri: string): string => {
+    try {
+      const abs = new URL(uri, upstream).href;
+      const p = new URL('/proxy', baseUrl);
+      p.searchParams.set('u', abs);
+      if (h) p.searchParams.set('h', h);
+      return p.toString();
+    } catch {
+      return uri;
+    }
+  };
   return body
     .split('\n')
     .map((line) => {
       const t = line.trim();
-      if (!t || t.startsWith('#')) return line;
-      try {
-        const abs = new URL(t, upstream).href;
-        const p = new URL('/proxy', baseUrl);
-        p.searchParams.set('u', abs);
-        if (h) p.searchParams.set('h', h);
-        return p.toString();
-      } catch {
-        return line;
+      if (!t) return line;
+      if (t.startsWith('#')) {
+        if (!t.includes('URI="')) return line;
+        return line.replace(TAG_URI_RE, (_m, uri: string) => `URI="${rewriteUri(uri)}"`);
       }
+      return rewriteUri(t);
     })
     .join('\n');
 }
