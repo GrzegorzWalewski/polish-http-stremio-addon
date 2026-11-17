@@ -20,6 +20,10 @@ RUN cd polish-http-stremio-addon && npm run build
 FROM node:22-alpine
 WORKDIR /app
 ENV NODE_ENV=production
+# curl: dood-family Cloudflare wall 403s node's TLS fingerprint — the dood
+# resolver shells out to curl for the embed/pass_md5 fetches (fetcher
+# resolvers/dood.ts fetchViaCurl fallback)
+RUN apk add --no-cache curl
 
 # same layout as /build so the addon's `file:../movies-series-fetcher`
 # symlink inside node_modules keeps resolving
