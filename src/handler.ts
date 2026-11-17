@@ -86,6 +86,9 @@ async function runProviders(
   media: MediaResult,
   parsed: ParsedStreamId
 ): Promise<{ results: StreamResult[]; warnings: string[] }> {
+  console.log(
+    `${new Date().toISOString()} media: ${media.imdbId} "${media.plTitle}" / "${media.originalTitle}" ${media.year} ${media.type}`
+  );
   const absoluteEpisode =
     parsed.season && parsed.episode
       ? await absoluteEpisodeFor(media, parsed.season, parsed.episode)
