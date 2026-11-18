@@ -20,17 +20,18 @@ import {
 } from './stremio.js';
 
 /**
- * Must exceed a FlareSolverr CF solve (~15s fast CPU, 30-40s+ on weak boxes):
- * a timeout that fires mid-solve prevents the solved cookies from being
- * cached, so every cold request re-pays the solve. filman's 60s rate-limit
- * sleep also fits under this budget now.
+ * Ceiling per provider. On the server CPU a cold FlareSolverr solve takes
+ * 75-80s — it NEVER fits in-request there, but the solve keeps running in
+ * the background and its cookies are cached for the next request, so a
+ * smaller ceiling only bounds worst-case latency (60s ceiling = every
+ * request behind a slow provider stalled a full minute).
  */
-const PROVIDER_TIMEOUT_MS = 60_000;
-/** Embed resolvers that need longer than this rarely succeed at all —
- * unresolved embeds degrade to external links, so it's better to answer
- * fast than to burn the stage budget on a stuck hoster. */
-const EMBED_TIMEOUT_MS = 5_000;
-const RESOLVE_STAGE_BUDGET_MS = 8_000;
+const PROVIDER_TIMEOUT_MS = 40_000;
+/** Embed resolvers: the byse PoW solve is ~0.7s on a fast CPU but 3-5s on
+ * the weak server under concurrent load — a 5s ceiling made warm-cookie
+ * byse embeds flaky MISSes (rows degraded to external). */
+const EMBED_TIMEOUT_MS = 10_000;
+const RESOLVE_STAGE_BUDGET_MS = 16_000;
 const ABSOLUTE_EPISODE_TTL_MS = 6 * 60 * 60 * 1000;
 const SUCCESS_TTL_MS = 30 * 60 * 1000;
 const ALL_WARNED_TTL_MS = 5 * 60 * 1000;
