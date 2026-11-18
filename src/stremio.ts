@@ -2,7 +2,7 @@ import type { StreamResult } from 'movies-series-fetcher/lib';
 import { proxyUrlFor } from './proxy.js';
 
 export const ADDON_ID = 'community.polish-streams-addon';
-export const ADDON_VERSION = '1.0.19';
+export const ADDON_VERSION = '1.0.20';
 
 /**
  * Base URL of this addon's own server (used for stream proxying).
